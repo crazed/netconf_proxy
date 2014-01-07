@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"github.com/crazed/ncclient-go"
 	"io"
 	"log"
@@ -46,15 +45,14 @@ func NetconfWorker(id int, request string, jobs <-chan *ncclient.Ncclient, resul
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	t := new(NetconfRequest)
 	json.NewDecoder(r.Body).Decode(t)
-	// TODO: logging..
-	fmt.Println(t)
+	log.Printf("Received a request to run '%s' on %d hosts", t.Request, len(t.Hosts))
 
 	jobs := make(chan *ncclient.Ncclient, len(t.Hosts))
 	results := make(chan *NetconfResult, len(t.Hosts))
 
 	// Queue up a bunch of work
 	for i, host := range t.Hosts {
-		log.Println("Creating work for", host)
+		log.Println("Creating worker for", host)
 		go NetconfWorker(i, t.Request, jobs, results)
 		client := ncclient.MakeClient(t.Username, t.Password, host, t.Port)
 		jobs <- &client
