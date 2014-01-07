@@ -11,9 +11,11 @@ If you have Go installed and configured, it's as simple as running:
 
 Once installed, start up the daemon like so:
 
-        netconf_proxy
+        $ netconf_proxy
+        2014/01/07 12:39:54 Listening on ':8080', no TLS!
 
-There is currently very little output, sorry, but your proxy is now up and running on port 8080. You can make a call with something like this:
+
+Your proxy is now up and running on port 8080, check the `--help` flag to enable TLS and change what port you're running on. You can make a call with something like this:
 
         curl localhost:8080/netconf -d'
           {"username":"admin",
