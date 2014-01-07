@@ -5,7 +5,8 @@ This provides a simple way to execute [NETCONF](http://en.wikipedia.org/wiki/NET
 
 If you have Go installed and configured, it's as simple as running:
 
-         go install github.com/crazed/netconf_proxy
+         $ go get github.com/crazed/netconf_proxy
+         $ go install github.com/crazed/netconf_proxy
 
 **Example Usage**
 
