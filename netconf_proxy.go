@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/crazed/ncclient-go"
 	"io"
@@ -92,6 +93,25 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	var useTls bool
+	var tlsCertFile string
+	var tlsKeyFile string
+	var listen string
+	flag.BoolVar(&useTls, "secure", false, "Enable TLS server, requires cert and key flags")
+	flag.StringVar(&tlsCertFile, "cert", "", "TLS certificate file path")
+	flag.StringVar(&tlsKeyFile, "key", "", "TLS key file path")
+	flag.StringVar(&listen, "listen", ":8080", "Listen string passed to ListenAndServe")
+	flag.Parse()
+
 	http.HandleFunc("/netconf", NetconfHandler)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	if useTls {
+		if tlsCertFile == "" || tlsKeyFile == "" {
+			panic("Must set key file and cert file")
+		}
+		log.Printf("Listening on '%s' using TLS (key: %s cert: %s)", listen, tlsKeyFile, tlsCertFile)
+		log.Fatal(http.ListenAndServeTLS(listen, tlsCertFile, tlsKeyFile, nil))
+	} else {
+		log.Printf("Listening on '%s', no TLS!", listen)
+		log.Fatal(http.ListenAndServe(listen, nil))
+	}
 }
