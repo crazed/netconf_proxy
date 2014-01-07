@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/crazed/ncclient-go"
 	"io"
 	"log"
 	"net/http"
 )
+
+const VERSION = "0.0.1"
 
 type NetconfRequest struct {
 	Hosts    []string
@@ -95,11 +98,18 @@ func main() {
 	var tlsCertFile string
 	var tlsKeyFile string
 	var listen string
+	var wantsVersion bool
 	flag.BoolVar(&useTls, "secure", false, "Enable TLS server, requires cert and key flags")
 	flag.StringVar(&tlsCertFile, "cert", "", "TLS certificate file path")
 	flag.StringVar(&tlsKeyFile, "key", "", "TLS key file path")
 	flag.StringVar(&listen, "listen", ":8080", "Listen string passed to ListenAndServe")
+	flag.BoolVar(&wantsVersion, "version", false, "return version number and exit")
 	flag.Parse()
+
+	if wantsVersion {
+		fmt.Println("netconf_proxy version:", VERSION)
+		return
+	}
 
 	http.HandleFunc("/netconf", NetconfHandler)
 	if useTls {
