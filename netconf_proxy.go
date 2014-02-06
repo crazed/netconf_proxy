@@ -17,6 +17,7 @@ type NetconfRequest struct {
 	Hosts    []string
 	Username string
 	Password string
+	Key      string
 	Port     int
 	Request  string
 }
@@ -57,7 +58,7 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	for i, host := range t.Hosts {
 		log.Println("Creating worker for", host)
 		go NetconfWorker(i, t.Request, jobs, results)
-		client := ncclient.MakeClient(t.Username, t.Password, host, t.Port)
+		client := ncclient.MakeClient(t.Username, t.Password, host, t.Key, t.Port)
 		jobs <- &client
 	}
 	close(jobs)
