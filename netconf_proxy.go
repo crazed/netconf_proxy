@@ -11,7 +11,7 @@ import (
 	"net/http"
 )
 
-const VERSION = "0.0.1"
+const VERSION = "0.0.2"
 
 type NetconfRequest struct {
 	Hosts    []string
