@@ -28,22 +28,24 @@ type NetconfResult struct {
 	client  *ncclient.Ncclient
 }
 
-func NetconfWorker(id int, request string, jobs <-chan *ncclient.Ncclient, results chan<- *NetconfResult) {
-	for client := range jobs {
-		result := new(NetconfResult)
-		result.client = client
-		if err := client.Connect(); err != nil {
-			result.success = false
+func NetconfWorker(id int, request string, client *ncclient.Ncclient) *NetconfResult {
+	result := new(NetconfResult)
+	result.client = client
+	if err := client.Connect(); err != nil {
+		result.success = false
+		result.output = bytes.NewBufferString(err.Error())
+	} else {
+		defer client.Close()
+		client.SendHello()
+		if output, err := client.Write(request); err != nil {
 			result.output = bytes.NewBufferString(err.Error())
-			results <- result
+			result.success = false
 		} else {
-			defer client.Close()
-			client.SendHello()
-			result.output = client.Write(request)
+			result.output = output
 			result.success = true
-			results <- result
 		}
 	}
+	return result
 }
 
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
@@ -51,17 +53,15 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(t)
 	log.Printf("Received a request to run '%s' on %d hosts", t.Request, len(t.Hosts))
 
-	jobs := make(chan *ncclient.Ncclient, len(t.Hosts))
 	results := make(chan *NetconfResult, len(t.Hosts))
 
 	// Queue up a bunch of work
 	for i, host := range t.Hosts {
-		log.Println("Creating worker for", host)
-		go NetconfWorker(i, t.Request, jobs, results)
 		client := ncclient.MakeClient(t.Username, t.Password, host, t.Key, t.Port)
-		jobs <- &client
+		go func() {
+			results <- NetconfWorker(i, t.Request, &client)
+		}()
 	}
-	close(jobs)
 
 	// Use http.Flusher if we can so clients can read results in real time
 	if f, ok := w.(http.Flusher); ok {
@@ -90,7 +90,9 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Success = result.success
 
 		// Flush this line
-		encoder.Encode(&resp)
+		if err := encoder.Encode(&resp); err != nil {
+			log.Println("encoding error:", err)
+		}
 	}
 }
 
