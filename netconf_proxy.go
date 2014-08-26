@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/crazed/ncclient-go"
@@ -101,7 +102,14 @@ func retrieveResults(results chan *NetconfResult, resultCount int, encoder *json
 func newNetconfRequest(body io.Reader) *NetconfRequest {
 	// Decode our JSON body into a NetconfRequest struct
 	request := new(NetconfRequest)
-	json.NewDecoder(body).Decode(request)
+	err := json.NewDecoder(body).Decode(request)
+	if err != nil {
+		panic(errors.New("JSON parse error: " + err.Error()))
+	}
+	// Validate we have an actual request to run
+	if request.Request == "" {
+		panic(errors.New("received an empty request!"))
+	}
 	// Make sure we have a valid SSH port to deal with
 	if request.Port == 0 {
 		request.Port = 22
@@ -111,10 +119,9 @@ func newNetconfRequest(body io.Reader) *NetconfRequest {
 
 // a simple helper for reporting errors back to clients
 func jsonError(w http.ResponseWriter, error string, code int) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	// Poor man's JSON encoding for now
-	fmt.Fprintln(w, "{ \"error\": \"" + error + "\" }")
+	fmt.Fprintln(w, "{ \"error\": \""+error+"\" }")
 }
 
 // Helper for catching errors
@@ -163,6 +170,8 @@ func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
 // but was used during the proof of concept.
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	defer errRecovery(w)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v1"
 	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Hosts))
@@ -194,6 +203,8 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 // It would be good to eventually simplify this stuff a bit more.
 func V2NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	defer errRecovery(w)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v2"
 	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Nodes))
@@ -214,11 +225,15 @@ func V2NetconfHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // This validate handler will take a netconf request, and make sure that
-// a supplied template will actually work.
+// a supplied template will actually compile. In the future, this should
+// probably validate the resulting XML.
 func V2ValidateHandler(w http.ResponseWriter, r *http.Request) {
 	defer errRecovery(w)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v2"
+	log.Printf("Received a request to validate '%s'", n.Request)
 	template.Must(template.New("rpc-request").Parse(n.Request))
 	w.WriteHeader(200)
 }
@@ -241,7 +256,7 @@ func main() {
 		return
 	}
 
-	// Mount our two netconf handlers appropriately.
+	// Mount our netconf handlers
 	http.HandleFunc("/netconf", NetconfHandler)
 	http.HandleFunc("/v2/netconf", V2NetconfHandler)
 	http.HandleFunc("/v2/validate", V2ValidateHandler)
