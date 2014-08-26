@@ -13,7 +13,7 @@ import (
 	"text/template"
 )
 
-const VERSION = "0.0.4"
+const VERSION = "0.0.5"
 
 type Node struct {
 	Facts    map[string]string
