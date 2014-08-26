@@ -41,6 +41,10 @@ type NetconfResult struct {
 // NETCONF protocol and write our request. The return value is a NetconfResult, which
 // is used by retrieveResults to flush our data to the HTTP caller.
 func performWork(request string, client *ncclient.Ncclient) (result *NetconfResult) {
+	// Initialize our NetconfResult
+	result = new(NetconfResult)
+	result.client = client
+
 	// Make sure we can connect
 	if err := client.Connect(); err != nil {
 		result.output = bytes.NewBufferString(err.Error())
