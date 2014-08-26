@@ -36,6 +36,10 @@ type NetconfResult struct {
 	client  *ncclient.Ncclient
 }
 
+// This function is used to take a raw RPC request in string form, and an Ncclient.
+// With this, it will attempt to connect to our netconf client, then initiate the
+// NETCONF protocol and write our request. The return value is a NetconfResult, which
+// is used by retrieveResults to flush our data to the HTTP caller.
 func performWork(request string, client *ncclient.Ncclient) (result *NetconfResult) {
 	// Make sure we can connect
 	if err := client.Connect(); err != nil {
@@ -59,45 +63,10 @@ func performWork(request string, client *ncclient.Ncclient) (result *NetconfResu
 	return result
 }
 
-func NetconfTemplateWorker(template *template.Template, client *ncclient.Ncclient, node *Node) (result *NetconfResult) {
-	// When using a template.Template, the Execute method expects
-	// an io.Writer interface. Here's a quick way to satisfy that
-	// requirement, by using a buffer.
-	var requestBuffer bytes.Buffer
-	// Make sure we can properly generate our RPC command using
-	// the supplied template. Store the results in our buffer.
-	err := template.Execute(&requestBuffer, node)
-	if err != nil {
-		// If we do have an error, short circuit here
-		result := new(NetconfResult)
-		result.success = false
-		result.output = bytes.NewBufferString("Template error: " + err.Error())
-		return result
-	}
-	// Convert our buffer into a string, which is what our ncclient.Client
-	// expects as input when calling the Write method.
-	request := requestBuffer.String()
-	// Continue on with our request
-	return performWork(request, client)
-}
-
-func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
-	// Internally call performWork, which lets us deprecate this
-	// function over time.
-	return performWork(request, client)
-}
-
-func newNetconfRequest(body io.Reader) *NetconfRequest {
-	// Decode our JSON body into a NetconfRequest struct
-	request := new(NetconfRequest)
-	json.NewDecoder(body).Decode(request)
-	// Make sure we have a valid SSH port to deal with
-	if request.Port == 0 {
-		request.Port = 22
-	}
-	return request
-}
-
+// Read through a channel, and write the results out to a json Encoder.
+// This blocks when called while waiting to read from our results channel.
+// It is important that resultCount be equal to the number of items that will be
+// dropped into our results channel.
 func retrieveResults(results chan *NetconfResult, resultCount int, encoder *json.Encoder) {
 	for i := 0; i < resultCount; i++ {
 		result := <-results
@@ -124,6 +93,53 @@ func retrieveResults(results chan *NetconfResult, resultCount int, encoder *json
 	}
 }
 
+// Create a new NetconfRequest and initialize the default values
+func newNetconfRequest(body io.Reader) *NetconfRequest {
+	// Decode our JSON body into a NetconfRequest struct
+	request := new(NetconfRequest)
+	json.NewDecoder(body).Decode(request)
+	// Make sure we have a valid SSH port to deal with
+	if request.Port == 0 {
+		request.Port = 22
+	}
+	return request
+}
+
+// When an HTTP request contains a template, use this worker function to process our template
+// before calling performWork.
+func NetconfTemplateWorker(template *template.Template, client *ncclient.Ncclient, node *Node) (result *NetconfResult) {
+	// When using a template.Template, the Execute method expects
+	// an io.Writer interface. Here's a quick way to satisfy that
+	// requirement, by using a buffer.
+	var requestBuffer bytes.Buffer
+	// Make sure we can properly generate our RPC command using
+	// the supplied template. Store the results in our buffer.
+	err := template.Execute(&requestBuffer, node)
+	if err != nil {
+		// If we do have an error, short circuit here
+		result := new(NetconfResult)
+		result.success = false
+		result.output = bytes.NewBufferString("Template error: " + err.Error())
+		return result
+	}
+	// Convert our buffer into a string, which is what our ncclient.Client
+	// expects as input when calling the Write method.
+	request := requestBuffer.String()
+	// Continue on with our request
+	return performWork(request, client)
+}
+
+// Default worker function, which was used uring proof of concept phases of this proxy.
+// Keep it around as there are some pieces of code written to use this directly.
+// TODO: deprecate this function
+func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
+	// Internally call performWork, which lets us deprecate this
+	// function over time.
+	return performWork(request, client)
+}
+
+// HTTP request handler for the "v1" of our API, which is not even name spaced,
+// but was used during the proof of concept.
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v1"
@@ -152,6 +168,8 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	retrieveResults(results, len(n.Hosts), json.NewEncoder(w))
 }
 
+// Our V2 handler, there's a bit of boiler plate here shared with the original handler.
+// It would be good to eventually simplify this stuff a bit more.
 func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v2"
@@ -190,8 +208,10 @@ func main() {
 		return
 	}
 
+	// Mount our two netconf handlers appropriately.
 	http.HandleFunc("/netconf", NetconfHandler)
 	http.HandleFunc("/v2", NetconfV2Handler)
+
 	if useTls {
 		if tlsCertFile == "" || tlsKeyFile == "" {
 			panic("Must set key file and cert file")
