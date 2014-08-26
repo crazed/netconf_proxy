@@ -109,6 +109,23 @@ func newNetconfRequest(body io.Reader) *NetconfRequest {
 	return request
 }
 
+// a simple helper for reporting errors back to clients
+func jsonError(w http.ResponseWriter, error string, code int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	// Poor man's JSON encoding for now
+	fmt.Fprintln(w, "{ \"error\": \"" + error + "\" }")
+}
+
+// Helper for catching errors
+func errRecovery(w http.ResponseWriter) {
+	if err := recover(); err != nil {
+		errString := err.(error).Error()
+		log.Println("panic recovery:", errString)
+		jsonError(w, errString, 500)
+	}
+}
+
 // When an HTTP request contains a template, use this worker function to process our template
 // before calling performWork.
 func NetconfTemplateWorker(template *template.Template, client *ncclient.Ncclient, node *Node) (result *NetconfResult) {
@@ -145,6 +162,7 @@ func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
 // HTTP request handler for the "v1" of our API, which is not even name spaced,
 // but was used during the proof of concept.
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
+	defer errRecovery(w)
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v1"
 	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Hosts))
@@ -174,7 +192,8 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 
 // Our V2 handler, there's a bit of boiler plate here shared with the original handler.
 // It would be good to eventually simplify this stuff a bit more.
-func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
+func V2NetconfHandler(w http.ResponseWriter, r *http.Request) {
+	defer errRecovery(w)
 	n := newNetconfRequest(r.Body)
 	n.APIVersion = "v2"
 	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Nodes))
@@ -192,6 +211,16 @@ func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
 	// Block while read in results, and write them out
 	// to our client.
 	retrieveResults(results, len(n.Nodes), json.NewEncoder(w))
+}
+
+// This validate handler will take a netconf request, and make sure that
+// a supplied template will actually work.
+func V2ValidateHandler(w http.ResponseWriter, r *http.Request) {
+	defer errRecovery(w)
+	n := newNetconfRequest(r.Body)
+	n.APIVersion = "v2"
+	template.Must(template.New("rpc-request").Parse(n.Request))
+	w.WriteHeader(200)
 }
 
 func main() {
@@ -214,7 +243,8 @@ func main() {
 
 	// Mount our two netconf handlers appropriately.
 	http.HandleFunc("/netconf", NetconfHandler)
-	http.HandleFunc("/v2/netconf", NetconfV2Handler)
+	http.HandleFunc("/v2/netconf", V2NetconfHandler)
+	http.HandleFunc("/v2/validate", V2ValidateHandler)
 
 	if useTls {
 		if tlsCertFile == "" || tlsKeyFile == "" {
