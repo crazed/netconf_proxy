@@ -210,7 +210,7 @@ func main() {
 
 	// Mount our two netconf handlers appropriately.
 	http.HandleFunc("/netconf", NetconfHandler)
-	http.HandleFunc("/v2", NetconfV2Handler)
+	http.HandleFunc("/v2/netconf", NetconfV2Handler)
 
 	if useTls {
 		if tlsCertFile == "" || tlsKeyFile == "" {
