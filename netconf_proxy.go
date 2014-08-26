@@ -36,47 +36,18 @@ type NetconfResult struct {
 	client  *ncclient.Ncclient
 }
 
-func NetconfTemplateWorker(template *template.Template, client *ncclient.Ncclient, node *Node) *NetconfResult {
-	result := new(NetconfResult)
-	result.client = client
+func performWork(request string, client *ncclient.Ncclient) (result *NetconfResult) {
 	// Make sure we can connect
 	if err := client.Connect(); err != nil {
-		result.success = false
 		result.output = bytes.NewBufferString(err.Error())
+		result.success = false
+		// If we're good..
 	} else {
+		// Ensure we always close our client connections! Then start the NETCONF protocol.
 		defer client.Close()
 		client.SendHello()
-		var request bytes.Buffer
-		err := template.Execute(&request, node)
-		// Make sure we can properly generate our RPC command using
-		// the supplied template.
-		if err != nil {
-			result.output = bytes.NewBufferString(err.Error())
-			result.success = false
-		} else {
-			// Finally, make sure our request gets written to the
-			// client.
-			if output, err := client.Write(request.String()); err != nil {
-				result.output = bytes.NewBufferString(err.Error())
-				result.success = false
-			} else {
-				result.output = output
-				result.success = true
-			}
-		}
-	}
-	return result
-}
-
-func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
-	result := new(NetconfResult)
-	result.client = client
-	if err := client.Connect(); err != nil {
-		result.success = false
-		result.output = bytes.NewBufferString(err.Error())
-	} else {
-		defer client.Close()
-		client.SendHello()
+		// Make sure our request gets written to the
+		// client.
 		if output, err := client.Write(request); err != nil {
 			result.output = bytes.NewBufferString(err.Error())
 			result.success = false
@@ -86,6 +57,34 @@ func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
 		}
 	}
 	return result
+}
+
+func NetconfTemplateWorker(template *template.Template, client *ncclient.Ncclient, node *Node) (result *NetconfResult) {
+	// When using a template.Template, the Execute method expects
+	// an io.Writer interface. Here's a quick way to satisfy that
+	// requirement, by using a buffer.
+	var requestBuffer bytes.Buffer
+	// Make sure we can properly generate our RPC command using
+	// the supplied template. Store the results in our buffer.
+	err := template.Execute(&requestBuffer, node)
+	if err != nil {
+		// If we do have an error, short circuit here
+		result := new(NetconfResult)
+		result.success = false
+		result.output = bytes.NewBufferString("Template error: " + err.Error())
+		return result
+	}
+	// Convert our buffer into a string, which is what our ncclient.Client
+	// expects as input when calling the Write method.
+	request := requestBuffer.String()
+	// Continue on with our request
+	return performWork(request, client)
+}
+
+func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
+	// Internally call performWork, which lets us deprecate this
+	// function over time.
+	return performWork(request, client)
 }
 
 func NetconfHandler(w http.ResponseWriter, r *http.Request) {
