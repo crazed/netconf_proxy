@@ -87,32 +87,19 @@ func NetconfWorker(request string, client *ncclient.Ncclient) *NetconfResult {
 	return performWork(request, client)
 }
 
-func NetconfHandler(w http.ResponseWriter, r *http.Request) {
-	t := new(NetconfRequest)
-	t.APIVersion = "v1"
-
-	json.NewDecoder(r.Body).Decode(t)
-	log.Printf("Received a request to run '%s' on %d hosts", t.Request, len(t.Nodes))
-
-	results := make(chan *NetconfResult, len(t.Hosts))
-
-	// Queue up a bunch of work
-	for _, host := range t.Hosts {
-		client := ncclient.MakeClient(t.Username, t.Password, host, t.Key, t.Port)
-		go func() {
-			results <- NetconfWorker(t.Request, &client)
-		}()
+func newNetconfRequest(body io.Reader) *NetconfRequest {
+	// Decode our JSON body into a NetconfRequest struct
+	request := new(NetconfRequest)
+	json.NewDecoder(body).Decode(request)
+	// Make sure we have a valid SSH port to deal with
+	if request.Port == 0 {
+		request.Port = 22
 	}
+	return request
+}
 
-	// Use http.Flusher if we can so clients can read results in real time
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	} else {
-		log.Println("Could not flush!")
-	}
-
-	encoder := json.NewEncoder(w)
-	for i := 0; i < len(t.Hosts); i++ {
+func retrieveResults(results chan *NetconfResult, resultCount int, encoder *json.Encoder) {
+	for i := 0; i < resultCount; i++ {
 		result := <-results
 
 		// Pull our entire response output into a string
@@ -137,26 +124,19 @@ func NetconfHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
-	t := new(NetconfRequest)
-	t.APIVersion = "v2"
-
-	json.NewDecoder(r.Body).Decode(t)
-
-	// If we did not get a Port, default to 22
-	if t.Port == 0 {
-		t.Port = 22
-	}
-
-	results := make(chan *NetconfResult, len(t.Nodes))
-
-	template := template.Must(template.New("rpc-request").Parse(t.Request))
-
-	// Launch a goroutine for every node we have
-	for _, node := range t.Nodes {
-		client := ncclient.MakeClient(t.Username, t.Password, node.Hostname, t.Key, t.Port)
+func NetconfHandler(w http.ResponseWriter, r *http.Request) {
+	n := newNetconfRequest(r.Body)
+	n.APIVersion = "v1"
+	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Hosts))
+	// Create a channel to allow communication between our go routines
+	// and our main process.
+	results := make(chan *NetconfResult, len(n.Hosts))
+	// Create one go routine for every Host we are handling, essentially
+	// this creates a new NETCONF over SSH connection for every host requested.
+	for _, host := range n.Hosts {
+		client := ncclient.MakeClient(n.Username, n.Password, host, n.Key, n.Port)
 		go func() {
-			results <- NetconfTemplateWorker(template, &client, &node)
+			results <- NetconfWorker(n.Request, &client)
 		}()
 	}
 
@@ -167,30 +147,29 @@ func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
 		log.Println("Could not flush!")
 	}
 
-	encoder := json.NewEncoder(w)
-	for i := 0; i < len(t.Nodes); i++ {
-		result := <-results
+	// Block while read in results, and write them out
+	// to our client.
+	retrieveResults(results, len(n.Hosts), json.NewEncoder(w))
+}
 
-		// Pull our entire response output into a string
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(result.output)
-		output := buf.String()
+func NetconfV2Handler(w http.ResponseWriter, r *http.Request) {
+	n := newNetconfRequest(r.Body)
+	n.APIVersion = "v2"
+	log.Printf("Received a request to run '%s' on %d hosts", n.Request, len(n.Nodes))
+	results := make(chan *NetconfResult, len(n.Nodes))
+	template := template.Must(template.New("rpc-request").Parse(n.Request))
 
-		// Create a response structure
-		resp := struct {
-			Hostname string
-			Output   string
-			Success  bool
-		}{}
-		resp.Hostname = result.client.Hostname()
-		resp.Output = output
-		resp.Success = result.success
-
-		// Flush this line
-		if err := encoder.Encode(&resp); err != nil {
-			log.Println("encoding error:", err)
-		}
+	// Launch a goroutine for every node we have
+	for _, node := range n.Nodes {
+		client := ncclient.MakeClient(n.Username, n.Password, node.Hostname, n.Key, n.Port)
+		go func() {
+			results <- NetconfTemplateWorker(template, &client, &node)
+		}()
 	}
+
+	// Block while read in results, and write them out
+	// to our client.
+	retrieveResults(results, len(n.Nodes), json.NewEncoder(w))
 }
 
 func main() {
