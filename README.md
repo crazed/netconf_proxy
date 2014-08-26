@@ -32,6 +32,22 @@ The response output will look something like this:
 
 The HTTP connection will stream lines of JSON data after each NETCONF connection sends data back to the proxy server.
 
+**V2 API with templating support**
+
+Essentially this is a natural progression on the original mentality. This allows you to pass a list of nodes to run something against, and provide a list of facts that can be used to templatize your request. For example:
+
+        curl localhost:8080/v2/netconf -d'
+          {"username":"admin",
+           "password":"SUPER SECRET PASSWORD",
+           "port":22,
+           "request": "<get-interface-information><interface-name>{{.Facts.upstream_port}}</interface-name></get-interface-information>",
+           "nodes":[
+             { "hostname": "10.10.1.1", "facts": { "upstream_port": "ae0" } },
+             { "hostname": "10.10.1.2", "facts": { "upstream_port": "ae1" } }
+           ]}'
+
+In this case, we will change the rpc request per node based on the upstream_port fact.
+
 **Python Client**
 
 In an attempt to bring some metadata to NETCONF servers, there is a sample python client called [python-netcommander](http://github.com/crazed/python-netcommander). It should be simple to plug your own data source in to populate username, password, hosts, etc which can be piped into `netconf_proxy`.
